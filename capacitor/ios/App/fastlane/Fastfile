@@ -1,0 +1,70 @@
+default_platform(:ios)
+
+platform :ios do
+  desc "Push a new beta build to TestFlight"
+  lane :closed_beta do
+    setup_ci if ENV['CI']
+
+    # Configure App Store Connect API
+    app_store_connect_api_key(
+      key_id: ENV["APPLE_KEY_ID"],
+      issuer_id: ENV["APPLE_ISSUER_ID"],
+      key_content: "-----BEGIN PRIVATE KEY-----\n#{ENV['APPLE_KEY_CONTENT']}\n-----END PRIVATE KEY-----",
+      in_house: false,
+      is_key_content_base64: false
+    )
+
+    # Set version number from environment
+    increment_version_number(
+      version_number: ENV["VERSION_NUMBER"],
+      xcodeproj: "App.xcodeproj"
+    )
+    
+    # Auto-increment build number
+    increment_build_number(
+      build_number: latest_testflight_build_number + 1,
+      xcodeproj: "App.xcodeproj"
+    )
+
+    # Extract git authorization token from MATCH_GIT_URL
+    git_url = ENV["MATCH_GIT_URL"].sub("https://", "https://#{ENV["GIT_AUTHORIZATION"]}@")
+
+    # Sync certificates and profiles
+    sync_code_signing(
+      type: "appstore",
+      app_identifier: ENV["DEVELOPER_APP_IDENTIFIER"],
+      git_url: git_url,
+      readonly: true,
+      keychain_name: "build.keychain",
+      keychain_password: ENV["TEMP_KEYCHAIN_PASSWORD"]
+    )
+
+    # Update code signing in project
+    update_code_signing_settings(
+      use_automatic_signing: false,
+      path: "App.xcodeproj",
+      team_id: ENV["DEVELOPER_PORTAL_TEAM_ID"],
+      code_sign_identity: "iPhone Distribution",
+      profile_name: "match AppStore #{ENV['DEVELOPER_APP_IDENTIFIER']}",
+      bundle_identifier: ENV["DEVELOPER_APP_IDENTIFIER"]
+    )
+
+    # Build the app
+    build_ios_app(
+      scheme: "App",
+      workspace: "App.xcworkspace",
+      export_method: "app-store",
+      export_options: {
+        provisioningProfiles: { 
+          ENV["DEVELOPER_APP_IDENTIFIER"] => "match AppStore #{ENV['DEVELOPER_APP_IDENTIFIER']}"
+        }
+      }
+    )
+
+    # Upload to TestFlight with processing wait
+    upload_to_testflight(
+      skip_waiting_for_build_processing: false,
+      wait_processing_interval: 30
+    )
+  end
+end

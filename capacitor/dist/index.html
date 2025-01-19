@@ -1,0 +1,262 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <meta name="color-scheme" content="light dark">
+    <title>Asteroids - WebAssembly</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        html {
+            width: 100%;
+            height: 100dvh;
+            background-color: #000000;
+            color-scheme: dark;
+        }
+
+        body {
+            width: 100%;
+            height: 100dvh;
+            position: fixed;
+            overflow: hidden;
+            margin: 0;
+            padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background-color: #000000;
+            touch-action: none;
+            -webkit-touch-callout: none;
+            -webkit-tap-highlight-color: transparent;
+            -webkit-user-select: none;
+            user-select: none;
+        }
+
+        #canvas-container {
+            width: 100%;
+            height: 100%;
+            position: fixed;
+            top: 0;
+            left: 0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            overflow: hidden;
+            background-color: #000000;
+        }
+
+        canvas {
+            position: absolute;
+            image-rendering: pixelated;
+            image-rendering: crisp-edges;
+        }
+
+        #error-message {
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            color: white;
+            background: rgba(0,0,0,0.8);
+            padding: 20px;
+            border-radius: 10px;
+            text-align: center;
+            display: none;
+            z-index: 1000;
+        }
+    </style>
+</head>
+<body>
+    <div id="canvas-container">
+        <canvas id="canvas"></canvas>
+    </div>
+    <div id="error-message"></div>
+
+    <script>
+        // Global error handler
+        window.onerror = function(msg, url, lineNo, columnNo, error) {
+            console.error('Window Error:', {msg, url, lineNo, columnNo, error});
+            showError(`Error: ${msg}\nLine: ${lineNo}`);
+            return false;
+        };
+
+        // Helper functions
+        function showError(message) {
+            const errorDiv = document.getElementById('error-message');
+            errorDiv.textContent = message;
+            errorDiv.style.display = 'block';
+            console.error(message);
+        }
+
+        function getAssetPath(filename) {
+            return window.Capacitor ? `public/assets/${filename}` : `assets/${filename}`;
+        }
+
+        function getViewportSize() {
+            const vh = window.innerHeight;
+            const vw = window.innerWidth;
+            const docHeight = document.documentElement.clientHeight;
+            return {
+                width: vw,
+                height: Math.min(vh, docHeight)
+            };
+        }
+
+        // Canvas handling
+        function updateCanvasSize() {
+            const canvas = document.getElementById('canvas');
+            if (!canvas) {
+                console.error('Canvas element not found');
+                return;
+            }
+            const container = document.getElementById('canvas-container');
+            if (!container) {
+                console.error('Canvas container not found');
+                return;
+            }
+            
+            console.log('Updating canvas size...');
+            
+            canvas.style.cssText = '';
+            
+            const viewport = getViewportSize();
+            const containerWidth = viewport.width;
+            const containerHeight = viewport.height;
+            
+            canvas.width = 800;
+            canvas.height = 600;
+            
+            const isLandscape = containerWidth > containerHeight;
+            let targetWidth, targetHeight;
+            
+            if (isLandscape) {
+                targetHeight = containerHeight;
+                targetWidth = targetHeight * (4/3);
+                
+                if (targetWidth > containerWidth) {
+                    targetWidth = containerWidth;
+                    targetHeight = targetWidth * (3/4);
+                }
+            } else {
+                targetWidth = containerWidth;
+                targetHeight = targetWidth * (3/4);
+                
+                if (targetHeight > containerHeight) {
+                    targetHeight = containerHeight;
+                    targetWidth = targetHeight * (4/3);
+                }
+            }
+            
+            targetWidth = Math.floor(targetWidth);
+            targetHeight = Math.floor(targetHeight);
+            
+            canvas.style.width = targetWidth + 'px';
+            canvas.style.height = targetHeight + 'px';
+            
+            const translateX = (containerWidth - targetWidth) / 2;
+            const translateY = (containerHeight - targetHeight) / 2;
+            canvas.style.transform = `translate(${translateX}px, ${translateY}px)`;
+            
+            console.log('Canvas dimensions:', {
+                width: canvas.width,
+                height: canvas.height,
+                styleWidth: canvas.style.width,
+                styleHeight: canvas.style.height
+            });
+        }
+
+        // WebAssembly initialization
+        let initializationAttempts = 0;
+        const MAX_ATTEMPTS = 3;
+
+        async function initializeWebAssembly() {
+            console.log('Starting WebAssembly initialization...');
+            
+            if (!WebAssembly.instantiateStreaming) {
+                console.log('WebAssembly.instantiateStreaming not available, using polyfill');
+                WebAssembly.instantiateStreaming = async (resp, importObject) => {
+                    const source = await (await resp).arrayBuffer();
+                    return await WebAssembly.instantiate(source, importObject);
+                };
+            }
+
+            try {
+                const go = new Go();
+                const wasmPath = getAssetPath('game.wasm');
+                console.log('Environment:', {
+                    isCapacitor: !!window.Capacitor,
+                    wasmPath,
+                    documentPath: document.location.href
+                });
+                
+                const response = await fetch(wasmPath);
+                if (!response.ok) {
+                    throw new Error(`Failed to fetch WASM file: ${response.status} ${response.statusText}`);
+                }
+                
+                console.log('WASM file fetched successfully, instantiating...');
+                const result = await WebAssembly.instantiateStreaming(response, go.importObject);
+                console.log('WebAssembly instantiated successfully, starting game...');
+                
+                updateCanvasSize();
+                
+                try {
+                    await go.run(result.instance);
+                } catch (runError) {
+                    console.error('Error running WebAssembly:', runError);
+                    throw runError;
+                }
+            } catch (err) {
+                console.error('Detailed error:', {
+                    message: err.message,
+                    stack: err.stack,
+                    name: err.name,
+                    cause: err.cause
+                });
+                
+                if (initializationAttempts < MAX_ATTEMPTS) {
+                    initializationAttempts++;
+                    console.log(`Retrying initialization (attempt ${initializationAttempts}/${MAX_ATTEMPTS})...`);
+                    setTimeout(initializeWebAssembly, 1000);
+                } else {
+                    showError(`Failed to load game: ${err.message}`);
+                }
+            }
+        }
+
+        // Event listeners
+        window.addEventListener('resize', () => {
+            clearTimeout(window.resizeTimeout);
+            window.resizeTimeout = setTimeout(updateCanvasSize, 100);
+        });
+
+        window.addEventListener('orientationchange', () => {
+            updateCanvasSize();
+            setTimeout(updateCanvasSize, 100);
+            setTimeout(updateCanvasSize, 300);
+        });
+
+        // Load wasm_exec.js and initialize
+        const script = document.createElement('script');
+        script.src = getAssetPath('wasm_exec.js');
+        script.onload = () => {
+            console.log('wasm_exec.js loaded successfully');
+            if (document.readyState === 'loading') {
+                document.addEventListener('DOMContentLoaded', initializeWebAssembly);
+            } else {
+                initializeWebAssembly();
+            }
+        };
+        script.onerror = (e) => {
+            console.error('Failed to load wasm_exec.js:', e);
+            showError('Failed to load required JavaScript file');
+        };
+        document.head.appendChild(script);
+    </script>
+</body>
+</html>
