@@ -20,25 +20,34 @@ jobs:
     outputs:
       is_initialized: ${{ steps.check.outputs.is_initialized }}
     steps:
-      - name: Check if match repository is initialized
+      - name: Check if certificates exist for this app
         id: check
         env:
-          MATCH_GIT_URL: ${{ secrets.MATCH_GIT_URL }}
           GIT_AUTHORIZATION: ${{ secrets.GIT_AUTHORIZATION }}
+          DEVELOPER_APP_IDENTIFIER: ${{ secrets.DEVELOPER_APP_IDENTIFIER }}
         run: |
-          # Extract repo owner and name from the URL
-          REPO_PATH=$(echo $MATCH_GIT_URL | sed -n 's/.*github.com[:\/]\([^\/]*\/[^\/]*\).*/\1/p' | sed 's/\.git$//')
+          # Clone the match repository to check its contents
+          git clone https://$GIT_AUTHORIZATION@github.com/bobbyhiddn/fastlane.git match_repo
+          cd match_repo
           
-          # Check repository contents
-          HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
-            -H "Authorization: token $GIT_AUTHORIZATION" \
-            "https://api.github.com/repos/${REPO_PATH}/contents")
+          CERT_EXISTS=false
           
-          if [ "$HTTP_STATUS" = "200" ]; then
-            echo "Match repository exists and contains certificates."
+          if [ -d "profiles/appstore" ]; then
+            # Check for distribution profile with exact naming pattern
+            if [ -f "profiles/appstore/AppStore_${DEVELOPER_APP_IDENTIFIER}.mobileprovision" ]; then
+              echo "Found existing provisioning profile for ${DEVELOPER_APP_IDENTIFIER}"
+              CERT_EXISTS=true
+            fi
+          fi
+          
+          # Clean up
+          cd ..
+          rm -rf match_repo
+          
+          if [ "$CERT_EXISTS" = true ]; then
             echo "is_initialized=true" >> $GITHUB_OUTPUT
           else
-            echo "Error: Match repository is empty or not initialized."
+            echo "Error: No certificates found for ${DEVELOPER_APP_IDENTIFIER}"
             echo "Please run the iOS Match Init workflow first to set up certificates."
             echo "is_initialized=false" >> $GITHUB_OUTPUT
             exit 1
@@ -85,13 +94,14 @@ jobs:
           if [ "$BUILD_TYPE" = "release" ]; then
             BUILD_FLAGS="-ldflags=-w -ldflags=-s"
           fi
-          GOOS=js GOARCH=wasm go build $BUILD_FLAGS -o capacitor/src/assets/main.wasm
+          GOOS=js GOARCH=wasm go build $BUILD_FLAGS -o capacitor/src/assets/game.wasm
 
-      - name: Build and prepare Capacitor
+      - name: Build and copy assets
         run: |
           cd capacitor
-          npm run prepare
-          npm run ios:prepare
+          npm run build
+          node scripts/copy-assets.js
+          npx cap sync ios
 
       # Setup keychain for certificates
       - name: Setup Keychain
@@ -127,6 +137,7 @@ jobs:
           DEVELOPER_APP_ID: "${{ secrets.DEVELOPER_APP_ID }}"
           DEVELOPER_APP_IDENTIFIER: "${{ secrets.DEVELOPER_APP_IDENTIFIER }}"
           DEVELOPER_PORTAL_TEAM_ID: "${{ secrets.DEVELOPER_PORTAL_TEAM_ID }}"
+          FASTLANE_APPLE_ID: "${{ secrets.FASTLANE_APPLE_ID }}"
           MATCH_PASSWORD: "${{ secrets.MATCH_PASSWORD }}"
           MATCH_GIT_URL: "${{ secrets.MATCH_GIT_URL }}"
           GIT_AUTHORIZATION: "${{ secrets.GIT_AUTHORIZATION }}"
