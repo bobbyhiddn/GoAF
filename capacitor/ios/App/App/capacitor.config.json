@@ -1,7 +1,8 @@
 {
-	"appId": "com.bobbyhiddn.asteroids",
-	"appName": "ecs-asteroids",
+	"appId": "io.goaf.app",
+	"appName": "GoAF App",
 	"webDir": "dist",
+	"bundledWebRuntime": false,
 	"server": {
 		"iosScheme": "file",
 		"androidScheme": "file",
@@ -14,10 +15,16 @@
 	"plugins": {
 		"SplashScreen": {
 			"launchAutoHide": true,
-			"launchShowDuration": 2000,
-			"backgroundColor": "#000000",
-			"spinnerColor": "#FFFFFF"
+			"launchShowDuration": 1000,
+			"backgroundColor": "#FFFFFF",
+			"spinnerColor": "#000000"
+		},
+		"CapacitorHaptics": {
+			"enabled": true
 		}
+	},
+	"ios": {
+		"orientation": "landscape"
 	},
 	"packageClassList": [
 		"SplashScreenPlugin"
