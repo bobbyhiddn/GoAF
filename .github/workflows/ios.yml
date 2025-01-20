@@ -6,13 +6,9 @@ on:
   workflow_dispatch:
     inputs:
       version_number:
-        description: 'Version number (e.g., 1.0.0)'
+        description: 'Version number (e.g., 1.02)'
         required: true
-        default: '1.0.0'
-      build_type:
-        description: 'Build type (debug/release)'
-        required: true
-        default: 'release'
+        default: '1.02'
 
 jobs:
   check_match_setup:
@@ -25,9 +21,10 @@ jobs:
         env:
           GIT_AUTHORIZATION: ${{ secrets.GIT_AUTHORIZATION }}
           DEVELOPER_APP_IDENTIFIER: ${{ secrets.DEVELOPER_APP_IDENTIFIER }}
+          MATCH_GIT_URL: ${{ secrets.MATCH_GIT_URL }}
         run: |
           # Clone the match repository to check its contents
-          git clone https://$GIT_AUTHORIZATION@github.com/bobbyhiddn/fastlane.git match_repo
+          git clone $MATCH_GIT_URL match_repo
           cd match_repo
           
           CERT_EXISTS=false
@@ -86,18 +83,9 @@ jobs:
           cd capacitor
           npm ci
 
-      - name: Build WASM
-        env:
-          BUILD_TYPE: ${{ github.event.inputs.build_type || 'release' }}
-        run: |
-          BUILD_FLAGS=""
-          if [ "$BUILD_TYPE" = "release" ]; then
-            BUILD_FLAGS="-ldflags=-w -ldflags=-s"
-          fi
-          GOOS=js GOARCH=wasm go build $BUILD_FLAGS -o capacitor/src/assets/game.wasm
-
       - name: Build and copy assets
         run: |
+          GOOS=js GOARCH=wasm go build -o capacitor/src/assets/game.wasm
           cd capacitor
           npm run build
           node scripts/copy-assets.js
@@ -145,8 +133,7 @@ jobs:
           APPLE_KEY_ID: "${{ secrets.APPLE_KEY_ID }}"
           APPLE_ISSUER_ID: "${{ secrets.APPLE_ISSUER_ID }}"
           APPLE_KEY_CONTENT: "${{ secrets.APPLE_KEY_CONTENT }}"
-          VERSION_NUMBER: ${{ github.event.inputs.version_number || '1.0.0' }}
-          BUILD_TYPE: ${{ github.event.inputs.build_type || 'release' }}
+          VERSION_NUMBER: ${{ github.event.inputs.version_number || '1.02' }}
         run: |
           cd capacitor/ios/App
           bundle exec fastlane closed_beta
