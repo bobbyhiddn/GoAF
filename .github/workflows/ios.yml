@@ -5,10 +5,19 @@ on:
       - main
   workflow_dispatch:
     inputs:
-      version_number:
-        description: 'Version number (e.g., 1.02)'
+      version_type:
+        description: 'Version increment type (patch/minor/major)'
         required: true
-        default: '1.02'
+        default: 'patch'
+        type: choice
+        options:
+          - patch
+          - minor
+          - major
+      custom_version:
+        description: 'Custom version (leave empty for auto-increment)'
+        required: false
+        type: string
 
 jobs:
   check_match_setup:
@@ -19,29 +28,18 @@ jobs:
       - name: Check if match repository is initialized
         id: check
         env:
+          MATCH_GIT_URL: ${{ secrets.MATCH_GIT_URL }}
           GIT_AUTHORIZATION: ${{ secrets.GIT_AUTHORIZATION }}
-          DEVELOPER_APP_IDENTIFIER: ${{ secrets.DEVELOPER_APP_IDENTIFIER }}
         run: |
-          # Construct and use the git URL with auth token
-          MATCH_GIT_URL="https://$GIT_AUTHORIZATION@github.com/bobbyhiddn/fastlane.git"
-          git clone $MATCH_GIT_URL match_repo
-          cd match_repo
+          # Extract repo owner and name from the URL
+          REPO_PATH=$(echo $MATCH_GIT_URL | sed -n 's/.*github.com[:\/]\([^\/]*\/[^\/]*\).*/\1/p' | sed 's/\.git$//')
           
-          CERT_EXISTS=false
+          # Check repository contents
+          HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
+            -H "Authorization: token $GIT_AUTHORIZATION" \
+            "https://api.github.com/repos/${REPO_PATH}/contents")
           
-          if [ -d "profiles/appstore" ]; then
-            # Check for distribution profile with exact naming pattern
-            if [ -f "profiles/appstore/AppStore_${DEVELOPER_APP_IDENTIFIER}.mobileprovision" ]; then
-              echo "Found existing provisioning profile for ${DEVELOPER_APP_IDENTIFIER}"
-              CERT_EXISTS=true
-            fi
-          fi
-          
-          # Clean up
-          cd ..
-          rm -rf match_repo
-          
-          if [ "$CERT_EXISTS" = true ]; then
+          if [ "$HTTP_STATUS" = "200" ]; then
             echo "Match repository exists and contains certificates."
             echo "is_initialized=true" >> $GITHUB_OUTPUT
           else
@@ -133,7 +131,8 @@ jobs:
           APPLE_KEY_ID: "${{ secrets.APPLE_KEY_ID }}"
           APPLE_ISSUER_ID: "${{ secrets.APPLE_ISSUER_ID }}"
           APPLE_KEY_CONTENT: "${{ secrets.APPLE_KEY_CONTENT }}"
-          VERSION_NUMBER: ${{ github.event.inputs.version_number || '1.0' }}
+          VERSION_TYPE: ${{ github.event.inputs.version_type || 'patch' }}
+          CUSTOM_VERSION: ${{ github.event.inputs.custom_version }}
         run: |
           cd capacitor/ios/App
           bundle exec fastlane closed_beta
