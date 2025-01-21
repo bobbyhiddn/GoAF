@@ -19,6 +19,11 @@ on:
         required: false
         type: string
 
+permissions:
+  contents: write
+  deployments: write
+  actions: write
+
 jobs:
   check_match_setup:
     runs-on: ubuntu-latest
@@ -54,9 +59,77 @@ jobs:
     if: needs.check_match_setup.outputs.is_initialized == 'true'
     name: Deploy beta build to TestFlight
     runs-on: macos-latest
+    environment: ios
     steps:
       - name: Checkout code
         uses: actions/checkout@v3
+
+      - name: Get current version
+        id: version
+        run: |
+          # Default to 1.0.0 if not set
+          echo "CURRENT_VERSION=${CURRENT_VERSION:-1.0.0}" >> $GITHUB_OUTPUT
+          echo $CURRENT_VERSION
+        env:
+          CURRENT_VERSION: ${{ vars.CURRENT_VERSION }}
+
+      - name: Calculate next version
+        id: next_version
+        run: |
+          IFS='.' read -r major minor patch <<< "${{ steps.version.outputs.CURRENT_VERSION }}"
+          if [[ -n "${{ github.event.inputs.custom_version }}" ]]; then
+            next_version="${{ github.event.inputs.custom_version }}"
+          else
+            case "${{ github.event.inputs.version_type }}" in
+              major)
+                next_version="$((major + 1)).0.0"
+                ;;
+              minor)
+                next_version="${major}.$((minor + 1)).0"
+                ;;
+              *)
+                next_version="${major}.${minor}.$((patch + 1))"
+                ;;
+            esac
+          fi
+          echo "Calculated next version: $next_version"
+          echo "NEXT_VERSION=$next_version" >> $GITHUB_OUTPUT
+
+      - name: Update version in GitHub environment
+        if: success()
+        env:
+          GIT_AUTHORIZATION: ${{ secrets.GIT_AUTHORIZATION }}
+          NEXT_VERSION: ${{ steps.next_version.outputs.NEXT_VERSION }}
+        run: |
+          if [ -z "$NEXT_VERSION" ]; then
+            echo "Error: Next version is empty"
+            exit 1
+          fi
+          
+          echo "Updating to version: $NEXT_VERSION"
+          
+          # Update using curl
+          response=$(curl -L \
+            -X PATCH \
+            -H "Accept: application/vnd.github+json" \
+            -H "Authorization: Bearer $GIT_AUTHORIZATION" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            "https://api.github.com/repos/${{ github.repository }}/environments/ios/variables/CURRENT_VERSION" \
+            -d "{\"name\":\"CURRENT_VERSION\",\"value\":\"$NEXT_VERSION\"}" \
+            -w "\n%{http_code}")
+          
+          status_code=$(echo "$response" | tail -n1)
+          response_body=$(echo "$response" | sed '$d')
+          
+          echo "Response: $response_body"
+          echo "Status code: $status_code"
+          
+          if [ "$status_code" -ne 200 ] && [ "$status_code" -ne 204 ]; then
+            echo "Failed to update version"
+            exit 1
+          else
+            echo "Successfully updated version to $NEXT_VERSION"
+          fi
 
       - name: Setup Ruby
         uses: ruby/setup-ruby@v1
@@ -131,8 +204,8 @@ jobs:
           APPLE_KEY_ID: "${{ secrets.APPLE_KEY_ID }}"
           APPLE_ISSUER_ID: "${{ secrets.APPLE_ISSUER_ID }}"
           APPLE_KEY_CONTENT: "${{ secrets.APPLE_KEY_CONTENT }}"
-          VERSION_TYPE: ${{ github.event.inputs.version_type || 'patch' }}
-          CUSTOM_VERSION: ${{ github.event.inputs.custom_version }}
+          VERSION_TYPE: ${{ github.event.inputs.version_type }}
+          CUSTOM_VERSION: ${{ steps.next_version.outputs.NEXT_VERSION }}
         run: |
           cd capacitor/ios/App
           bundle exec fastlane closed_beta

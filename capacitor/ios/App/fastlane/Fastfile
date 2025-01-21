@@ -2,6 +2,13 @@ default_platform(:ios)
 
 platform :ios do
   desc "Push a new beta build to TestFlight"
+  desc "Required environment variables:"
+  desc "  APPLE_KEY_ID: App Store Connect API Key ID"
+  desc "  APPLE_ISSUER_ID: App Store Connect API Issuer ID"
+  desc "  APPLE_KEY_CONTENT: App Store Connect API Key Content"
+  desc "  DEVELOPER_APP_IDENTIFIER: Bundle identifier of your app"
+  desc "  APP_STORE_CONNECT_TEAM_ID: App Store Connect Team ID"
+  desc "  CUSTOM_VERSION: Version number to set (e.g., 1.3.0)"
   lane :closed_beta do
     setup_ci if ENV['CI']
 
@@ -14,56 +21,14 @@ platform :ios do
       is_key_content_base64: false
     )
 
-    # Get current version from Xcode project
-    current_version = get_version_number(
-      xcodeproj: "App.xcodeproj",
-      target: "App"
+    # Set version number from GitHub environment
+    UI.message("Setting version to: #{ENV['CUSTOM_VERSION']}")
+    increment_version_number(
+      version_number: ENV["CUSTOM_VERSION"],
+      xcodeproj: "App.xcodeproj"
     )
-
-    # Ensure we have a valid version number
-    if current_version.nil? || current_version.empty? || !current_version.match(/^\d+\.\d+\.\d+$/)
-      # Set a default version if invalid
-      current_version = "1.0.0"
-      increment_version_number(
-        version_number: current_version,
-        xcodeproj: "App.xcodeproj"
-      )
-    end
-
-    # Handle version number
-    if ENV["CUSTOM_VERSION"].to_s.empty?
-      # Split current version into components
-      major, minor, patch = current_version.split('.').map(&:to_i)
-      
-      # Calculate new version
-      new_version = case ENV["VERSION_TYPE"]
-      when "major"
-        "#{major + 1}.0.0"
-      when "minor"
-        "#{major}.#{minor + 1}.0"
-      else # patch or default
-        "#{major}.#{minor}.#{patch + 1}"
-      end
-
-      # Set new version
-      increment_version_number(
-        version_number: new_version,
-        xcodeproj: "App.xcodeproj"
-      )
-    else
-      # Validate custom version format
-      unless ENV["CUSTOM_VERSION"].match(/^\d+\.\d+\.\d+$/)
-        UI.user_error!("Custom version must be in format X.Y.Z (e.g., 1.0.0)")
-      end
-      
-      # Use custom version if provided
-      increment_version_number(
-        version_number: ENV["CUSTOM_VERSION"],
-        xcodeproj: "App.xcodeproj"
-      )
-    end
     
-    # Auto-increment build number
+    # Auto-increment build number based on TestFlight
     current_build_number = latest_testflight_build_number(
       api_key: lane_context[SharedValues::APP_STORE_CONNECT_API_KEY],
       app_identifier: ENV["DEVELOPER_APP_IDENTIFIER"],
@@ -75,20 +40,17 @@ platform :ios do
       xcodeproj: "App.xcodeproj"
     )
 
-    # Extract git authorization token from MATCH_GIT_URL
-    git_url = ENV["MATCH_GIT_URL"]
-
     # Sync certificates and profiles
     sync_code_signing(
       type: "appstore",
       app_identifier: ENV["DEVELOPER_APP_IDENTIFIER"],
-      git_url: git_url,
+      git_url: ENV["MATCH_GIT_URL"],
       readonly: true,
       keychain_name: "build.keychain",
       keychain_password: ENV["TEMP_KEYCHAIN_PASSWORD"]
     )
 
-    # Update code signing in project
+    # Update code signing settings
     update_code_signing_settings(
       use_automatic_signing: false,
       path: "App.xcodeproj",
@@ -110,7 +72,7 @@ platform :ios do
       }
     )
 
-    # Upload to TestFlight with processing wait
+    # Upload to TestFlight and wait for processing
     upload_to_testflight(
       skip_waiting_for_build_processing: false,
       wait_processing_interval: 30
