@@ -34,7 +34,9 @@ A modern framework for building cross-platform applications using Go, WebAssembl
 
 ```
 .
-├── .github/workflows/      # GitHub Actions workflows for CI/CD
+├── .github/workflows/
+│   ├── ios-match-init.yml  # Initialize iOS certificates using Fastlane Match
+│   └── ios.yml            # Build and deploy to TestFlight
 ├── capacitor/             # Capacitor app wrapper
 │   ├── ios/              # iOS specific code
 │   ├── src/              # Web assets
