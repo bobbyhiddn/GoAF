@@ -24,3 +24,5 @@ ebiten-asteroids
 *.zip
 
 .github/workflows/auth/*.p8
+
+node_modules/
