@@ -93,6 +93,7 @@ npm run ios:build   # Open in Xcode
 ```
 
 ### Android
+(This has not been tested yet)
 Prerequisites:
 - Android Studio
 - JDK 17+
