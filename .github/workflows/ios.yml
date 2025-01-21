@@ -3,6 +3,11 @@ on:
   push:
     branches:
       - main
+    paths:
+      - '**.go'
+      - '**.html'
+      - '**.js'
+      - '**.css'
   workflow_dispatch:
     inputs:
       version_type:
@@ -18,6 +23,11 @@ on:
         description: 'Custom version (leave empty for auto-increment)'
         required: false
         type: string
+      force_build:
+        description: 'Force build even if no relevant files changed'
+        required: true
+        type: boolean
+        default: false
 
 permissions:
   contents: write
@@ -25,7 +35,51 @@ permissions:
   actions: write
 
 jobs:
+  check_changes:
+    runs-on: ubuntu-latest
+    outputs:
+      should_build: ${{ steps.check.outputs.should_build }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+        with:
+          fetch-depth: 2
+
+      - name: Check for relevant changes
+        id: check
+        run: |
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" && "${{ github.event.inputs.force_build }}" == "true" ]]; then
+            echo "Manual trigger with force build enabled"
+            echo "should_build=true" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+
+          # Get changed files
+          CHANGED_FILES=$(git diff --name-only HEAD^ HEAD)
+          
+          # Check for relevant file changes
+          RELEVANT_CHANGES=false
+          while IFS= read -r file; do
+            if [[ "$file" =~ \.(go|html|js|css)$ ]] || 
+               [[ "$file" =~ ^capacitor/src/ ]] || 
+               [[ "$file" =~ ^web/ ]]; then
+              RELEVANT_CHANGES=true
+              echo "Found relevant change in: $file"
+              break
+            fi
+          done <<< "$CHANGED_FILES"
+          
+          if [ "$RELEVANT_CHANGES" = true ]; then
+            echo "Relevant files changed, proceeding with build"
+            echo "should_build=true" >> $GITHUB_OUTPUT
+          else
+            echo "No relevant files changed, skipping build"
+            echo "should_build=false" >> $GITHUB_OUTPUT
+          fi
+
   check_match_setup:
+    needs: check_changes
+    if: needs.check_changes.outputs.should_build == 'true'
     runs-on: ubuntu-latest
     outputs:
       is_initialized: ${{ steps.check.outputs.is_initialized }}
@@ -55,8 +109,8 @@ jobs:
           fi
 
   deploy_ios:
-    needs: check_match_setup
-    if: needs.check_match_setup.outputs.is_initialized == 'true'
+    needs: [check_changes, check_match_setup]
+    if: needs.check_changes.outputs.should_build == 'true' && needs.check_match_setup.outputs.is_initialized == 'true'
     name: Deploy beta build to TestFlight
     runs-on: macos-latest
     environment: ios
