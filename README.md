@@ -42,7 +42,10 @@ A modern framework for building cross-platform applications using Go, WebAssembl
 │   ├── src/              # Web assets
 │   └── scripts/          # Build scripts
 ├── web/                  # Web server
-└── main.go               # Your Go application code
+├── utils/                # Utility scripts
+│   └── set-ios-secrets.sh  # Set iOS secrets
+│   └── image_resize.py    # Resize images
+└── main.go               # Your Go application code.
 ```
 
 ## 🔧 Development
